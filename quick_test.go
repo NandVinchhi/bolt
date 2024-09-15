@@ -18,25 +18,39 @@ func init() {
 
 	start := time.Now()
 
-	err = db.Update(func(tx *bolt.Tx) error {
-		b, err := tx.CreateBucketIfNotExists([]byte("testbucket"))
-		if err != nil {
-			return err
-		}
+	numGoroutines := 10
+	keysPerGoroutine := 100000
+	errChan := make(chan error, numGoroutines)
 
-		for i := 0; i < 1000000; i++ {
-			key := []byte(fmt.Sprintf("key%d", i))
-			value := []byte(fmt.Sprintf("value%d", i))
-			err = b.Put(key, value)
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	})
+	for g := 0; g < numGoroutines; g++ {
+		go func(goroutineID int) {
+			err := db.Update(func(tx *bolt.Tx) error {
+				b, err := tx.CreateBucketIfNotExists([]byte("testbucket"))
+				if err != nil {
+					return err
+				}
 
-	if err != nil {
-		log.Fatal(err)
+				startKey := goroutineID * keysPerGoroutine
+				endKey := startKey + keysPerGoroutine
+
+				for i := startKey; i < endKey; i++ {
+					key := []byte(fmt.Sprintf("key%d", i))
+					value := []byte(fmt.Sprintf("value%d", i))
+					err = b.Put(key, value)
+					if err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+			errChan <- err
+		}(g)
+	}
+
+	for i := 0; i < numGoroutines; i++ {
+		if err := <-errChan; err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	elapsed := time.Since(start)
